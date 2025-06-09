@@ -10,7 +10,7 @@ android {
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.tanishv12.walletsystem"
+        applicationId ".com SaveSync.walletsystem"
         minSdk 24
         targetSdk 34
         versionCode 1
