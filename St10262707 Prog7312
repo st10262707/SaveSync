@@ -1,0 +1,327 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+
+namespace EventManagementApp
+{
+    public class Event : IComparable<Event>
+    {
+        public string EventId { get; }
+        public string Name { get; }
+        public string Category { get; }
+        public DateTime Date { get; }
+        public int Priority { get; }
+
+        public Event(string eventId, string name, string category, DateTime date, int priority)
+        {
+            EventId = eventId;
+            Name = name;
+            Category = category;
+            Date = date;
+            Priority = priority;
+        }
+
+        public int CompareTo(Event other)
+        {
+            return Priority.CompareTo(other.Priority);
+        }
+
+        public override string ToString()
+        {
+            return $"EventID: {EventId}, Name: {Name}, Category: {Category}, Date: {Date:yyyy-MM-dd}, Priority: {Priority}";
+        }
+    }
+
+    public class EventManager
+    {
+        private Dictionary<string, Event> events = new Dictionary<string, Event>();
+        private Dictionary<string, HashSet<string>> eventsByCategory = new Dictionary<string, HashSet<string>>();
+        private Dictionary<DateTime, HashSet<string>> eventsByDate = new Dictionary<DateTime, HashSet<string>>();
+        private HashSet<string> categories = new HashSet<string>();
+        private HashSet<DateTime> dates = new HashSet<DateTime>();
+
+        private Stack<string> eventStack = new Stack<string>();
+        private Queue<string> eventQueue = new Queue<string>();
+        private SortedSet<Event> eventPriorityQueue = new SortedSet<Event>();
+
+        private List<string> userSearchHistory = new List<string>();
+
+        public void AddEvent(Event ev)
+        {
+            if (events.ContainsKey(ev.EventId))
+            {
+                Console.WriteLine($"Event with ID {ev.EventId} already exists.");
+                return;
+            }
+
+            events[ev.EventId] = ev;
+
+            if (!eventsByCategory.ContainsKey(ev.Category))
+                eventsByCategory[ev.Category] = new HashSet<string>();
+            eventsByCategory[ev.Category].Add(ev.EventId);
+
+            if (!eventsByDate.ContainsKey(ev.Date))
+                eventsByDate[ev.Date] = new HashSet<string>();
+            eventsByDate[ev.Date].Add(ev.EventId);
+
+            categories.Add(ev.Category);
+            dates.Add(ev.Date);
+
+            eventStack.Push(ev.EventId);
+            eventQueue.Enqueue(ev.EventId);
+            eventPriorityQueue.Add(ev);
+
+            Console.WriteLine($"Added: {ev}");
+        }
+
+        public Event PopEventStack()
+        {
+            if (eventStack.Count == 0)
+            {
+                Console.WriteLine("Stack is empty.");
+                return null;
+            }
+            string eid = eventStack.Pop();
+            var ev = events[eid];
+            Console.WriteLine($"Popped from stack: {ev}");
+            return ev;
+        }
+
+        public Event DequeueEvent()
+        {
+            if (eventQueue.Count == 0)
+            {
+                Console.WriteLine("Queue is empty.");
+                return null;
+            }
+            string eid = eventQueue.Dequeue();
+            var ev = events[eid];
+            Console.WriteLine($"Dequeued from queue: {ev}");
+            return ev;
+        }
+
+        public Event PopEventPriorityQueue()
+        {
+            if (eventPriorityQueue.Count == 0)
+            {
+                Console.WriteLine("Priority queue is empty.");
+                return null;
+            }
+            Event ev = eventPriorityQueue.Min;
+            eventPriorityQueue.Remove(ev);
+            Console.WriteLine($"Popped from priority queue: {ev}");
+            return ev;
+        }
+
+        public List<Event> SearchEvents(string query)
+        {
+            query = query.ToLower();
+            var matched = events.Values.Where(e => e.Name.ToLower().Contains(query)).ToList();
+
+            if (matched.Any())
+            {
+                userSearchHistory.Add(query);
+                if (userSearchHistory.Count > 20)
+                    userSearchHistory.RemoveAt(0);
+            }
+
+            return matched;
+        }
+
+        public List<Event> RecommendEvents(int maxRecommend = 5)
+        {
+            if (userSearchHistory.Count == 0)
+            {
+                Console.WriteLine("No search history for recommendations.");
+                return new List<Event>();
+            }
+
+            var categoryFrequency = new Dictionary<string, int>();
+            var nameKeywordFrequency = new Dictionary<string, int>();
+
+            foreach (var query in userSearchHistory)
+            {
+                foreach (var ev in events.Values)
+                {
+                    if (ev.Name.ToLower().Contains(query))
+                    {
+                        if (!categoryFrequency.ContainsKey(ev.Category))
+                            categoryFrequency[ev.Category] = 0;
+                        categoryFrequency[ev.Category]++;
+
+                        var words = ev.Name.ToLower().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                        foreach (var w in words)
+                        {
+                            if (!nameKeywordFrequency.ContainsKey(w))
+                                nameKeywordFrequency[w] = 0;
+                            nameKeywordFrequency[w]++;
+                        }
+                    }
+                }
+            }
+
+            var recommended = new List<Event>();
+
+            // Recommend top events from most frequent categories and keywords
+            var topCategories = categoryFrequency.OrderByDescending(kv => kv.Value).Select(kv => kv.Key).Take(3).ToList();
+            var topKeywords = nameKeywordFrequency.OrderByDescending(kv => kv.Value).Select(kv => kv.Key).Take(5).ToList();
+
+            var recommendedSet = new HashSet<string>();
+
+            foreach (var cat in topCategories)
+            {
+                var evs = eventsByCategory.ContainsKey(cat) ? eventsByCategory[cat] : new HashSet<string>();
+                foreach (var eid in evs)
+                {
+                    var ev = events[eid];
+                    if (!recommendedSet.Contains(eid) &&
+                        topKeywords.Any(k => ev.Name.ToLower().Contains(k)))
+                    {
+                        recommended.Add(ev);
+                        recommendedSet.Add(eid);
+                        if (recommended.Count >= maxRecommend)
+                            break;
+                    }
+                }
+                if (recommended.Count >= maxRecommend)
+                    break;
+            }
+
+            // If not enough recommendations, fill with recent events
+            if (recommended.Count < maxRecommend)
+            {
+                foreach (var ev in events.Values.OrderByDescending(e => e.Date))
+                {
+                    if (!recommendedSet.Contains(ev.EventId))
+                    {
+                        recommended.Add(ev);
+                        recommendedSet.Add(ev.EventId);
+                        if (recommended.Count >= maxRecommend)
+                            break;
+                    }
+                }
+            }
+
+            return recommended;
+        }
+
+        public void PrintEvents(IEnumerable<Event> evs)
+        {
+            foreach (var ev in evs)
+                Console.WriteLine(ev);
+        }
+    }
+
+    class Program
+    {
+        static void Main(string[] args)
+        {
+            var manager = new EventManager();
+
+            Console.WriteLine("Event Management Application");
+
+            while (true)
+            {
+                Console.WriteLine("\nMenu:");
+                Console.WriteLine("1. Add Event");
+                Console.WriteLine("2. Pop Event from Stack");
+                Console.WriteLine("3. Dequeue Event from Queue");
+                Console.WriteLine("4. Pop Event from Priority Queue");
+                Console.WriteLine("5. Search Events");
+                Console.WriteLine("6. Show Recommendations");
+                Console.WriteLine("7. Exit");
+                Console.Write("Choose an option: ");
+
+                var input = Console.ReadLine();
+                if (input == null) continue;
+
+                switch (input)
+                {
+                    case "1":
+                        Console.Write("Event ID: ");
+                        var id = Console.ReadLine();
+                        Console.Write("Event Name: ");
+                        var name = Console.ReadLine();
+                        Console.Write("Category: ");
+                        var category = Console.ReadLine();
+                        Console.Write("Date (yyyy-MM-dd): ");
+                        var dateStr = Console.ReadLine();
+                        Console.Write("Priority (integer, lower = higher): ");
+                        var priorityStr = Console.ReadLine();
+
+                        if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(name) || string.IsNullOrWhiteSpace(category)
+                            || string.IsNullOrWhiteSpace(dateStr) || string.IsNullOrWhiteSpace(priorityStr))
+                        {
+                            Console.WriteLine("Invalid input. Please try again.");
+                            break;
+                        }
+
+                        if (!DateTime.TryParse(dateStr, out DateTime date))
+                        {
+                            Console.WriteLine("Invalid date format.");
+                            break;
+                        }
+
+                        if (!int.TryParse(priorityStr, out int priority))
+                        {
+                            Console.WriteLine("Invalid priority.");
+                            break;
+                        }
+
+                        var ev = new Event(id.Trim(), name.Trim(), category.Trim(), date, priority);
+                        manager.AddEvent(ev);
+                        break;
+
+                    case "2":
+                        manager.PopEventStack();
+                        break;
+
+                    case "3":
+                        manager.DequeueEvent();
+                        break;
+
+                    case "4":
+                        manager.PopEventPriorityQueue();
+                        break;
+
+                    case "5":
+                        Console.Write("Enter search query: ");
+                        var query = Console.ReadLine();
+                        if (string.IsNullOrWhiteSpace(query))
+                        {
+                            Console.WriteLine("Empty query.");
+                            break;
+                        }
+                        var results = manager.SearchEvents(query.Trim());
+                        if (results.Count == 0)
+                            Console.WriteLine("No events found.");
+                        else
+                        {
+                            Console.WriteLine("Search Results:");
+                            manager.PrintEvents(results);
+                        }
+                        break;
+
+                    case "6":
+                        var recs = manager.RecommendEvents();
+                        if (recs.Count == 0)
+                            Console.WriteLine("No recommendations available.");
+                        else
+                        {
+                            Console.WriteLine("Recommended Events:");
+                            manager.PrintEvents(recs);
+                        }
+                        break;
+
+                    case "7":
+                        Console.WriteLine("Exiting...");
+                        return;
+
+                    default:
+                        Console.WriteLine("Invalid option.");
+                        break;
+                }
+            }
+        }
+    }
+}
